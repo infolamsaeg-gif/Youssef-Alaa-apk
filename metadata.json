@@ -1,0 +1,6 @@
+{
+  "name": "MY AGENCY",
+  "description": "بوابة عملاء MY AGENCY - متابعة المشاريع، استلام الملفات، طلب التعديلات والخدمات",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

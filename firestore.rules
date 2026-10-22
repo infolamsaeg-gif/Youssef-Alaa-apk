@@ -1,0 +1,138 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // قواعد حماية وأمان تطبيق MY AGENCY (Zero-Trust Security Rules)
+    // =========================================================================
+    // ملاحظة إدارية مهمة لإنشاء أول أدمن للنظام:
+    // 1. افتح Firebase Console -> Firestore Database.
+    // 2. أنشئ Collection اسمها "admins".
+    // 3. أضف Document يكون الـ Document ID هو الـ UID الخاص بحساب الأدمن (من Firebase Auth).
+    // 4. أضف حقلاً: role: "owner" و email: "info.lamsa.eg@gmail.com".
+    // =========================================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == "info.lamsa.eg@gmail.com"
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // 1. بيانات المستخدمين والعملاء users/{uid}
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isSignedIn() && request.auth.uid == userId
+                    && request.resource.data.fullName is string
+                    && request.resource.data.phonePrimary is string
+                    && request.resource.data.phoneSecondary is string
+                    && request.resource.data.governorate is string;
+      allow update: if (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin', 'adminRole', 'isActive']))
+                    || isAdmin();
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // 2. إدارة الأدوار والصلاحيات admins/{uid}
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 3. المشاريع projects/{id}
+    match /projects/{projectId} {
+      allow read: if isSignedIn() && (resource.data.clientUid == request.auth.uid || isAdmin());
+      allow create, update, delete: if isAdmin();
+      
+      // السماح للعميل بتقييم مشروعه المكتمل
+      allow update: if isSignedIn() && resource.data.clientUid == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating', 'reviewText']);
+    }
+
+    // 4. ملاحظات وقرارات العملاء feedback/{id}
+    match /feedback/{feedbackId} {
+      allow read: if isSignedIn() && (resource.data.clientUid == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.clientUid == request.auth.uid
+                    && request.resource.data.text is string && request.resource.data.text.size() <= 1000;
+      allow update, delete: if isAdmin();
+    }
+
+    // 5. الفواتير والمدفوعات invoices/{id}
+    match /invoices/{invoiceId} {
+      allow read: if isSignedIn() && (resource.data.clientUid == request.auth.uid || isAdmin());
+      // العميل يرفع إيصال سداد بإضافة عنصر إلى قائمة payments
+      allow update: if (isSignedIn() && resource.data.clientUid == request.auth.uid
+                       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['payments']))
+                    || isAdmin();
+      allow create, delete: if isAdmin();
+    }
+
+    // 6. تذاكر وشات الدعم الفني tickets/{id}
+    match /tickets/{ticketId} {
+      allow read: if isSignedIn() && (resource.data.clientUid == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.clientUid == request.auth.uid;
+      allow update: if isSignedIn() && (resource.data.clientUid == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && (get(/databases/$(database)/documents/tickets/$(ticketId)).data.clientUid == request.auth.uid || isAdmin());
+        allow create: if isSignedIn();
+      }
+    }
+
+    // 7. طلبات الخدمات orders/{id}
+    match /orders/{orderId} {
+      allow read: if isSignedIn() && (resource.data.clientUid == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.clientUid == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // 8. الخدمات والمعرض والإعلانات والإعدادات
+    match /services/{serviceId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /portfolio/{portfolioId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /coupons/{couponId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 9. الإشعارات notifications/{id}
+    match /notifications/{notifId} {
+      allow read: if isSignedIn() && (resource.data.toUid == request.auth.uid || isAdmin());
+      allow update: if isSignedIn() && resource.data.toUid == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow create, delete: if isAdmin();
+    }
+
+    // 10. سجل النشاطات auditLog/{id} (غير قابل للتعديل أو الحذف)
+    match /activityLog/{logId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+  }
+}
